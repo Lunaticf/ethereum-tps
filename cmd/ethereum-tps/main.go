@@ -19,7 +19,7 @@ import (
 func main() {
 	cmd := &cobra.Command{
 		Use:   "ethereum-tps",
-		Short: "Ethereum TPS Test.",
+		Short: "Ethereum TPS test Tool.",
 		Run: func(cmd *cobra.Command, args []string) {
 			jsonrpcEndpoint, err := cmd.Flags().GetString("jsonrpc-endpoint")
 			if err != nil {
@@ -50,12 +50,12 @@ func main() {
 		},
 	}
 	// flag
-	cmd.PersistentFlags().String("jsonrpc-endpoint", "http://127.0.0.1:8545", "JsonRPC endpoint for Ethereum")
-	cmd.PersistentFlags().String("main-key", "http://127.0.0.1:8545", "")
-	cmd.PersistentFlags().Int64("balance-limit", 10000000000000000, "")
-	cmd.PersistentFlags().Int64("gas-limit", 61569, "")
-	cmd.PersistentFlags().Int64("gas-price", 18000000000, "")
-	cmd.PersistentFlags().Int64("pending-tx-limit", 400, "")
+	cmd.PersistentFlags().String("jsonrpc-endpoint", "http://127.0.0.1:8545", "JsonRPC endpoint for Ethereum.")
+	cmd.PersistentFlags().String("main-key", "abc", "The main eth account's private key.")
+	cmd.PersistentFlags().Int64("balance-limit", 10000000000000000, "When reaching this limit, account will not distribute eth.")
+	cmd.PersistentFlags().Int64("gas-limit", 61569, "Global gasLimit for tx.")
+	cmd.PersistentFlags().Int64("gas-price", 18000000000, "Global gasPrice for tx.")
+	cmd.PersistentFlags().Int64("pending-tx-limit", 400, "The num of pending tx limit.")
 
 	goflag.Set("v", "4")
 	// TODO: once we switch everything over to Cobra commands, we can go back to calling

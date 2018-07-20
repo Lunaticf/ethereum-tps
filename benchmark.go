@@ -15,6 +15,18 @@ import (
 	"github.com/golang/glog"
 )
 
+type ResultData struct {
+	StartTime      time.Time
+	StartTimeP     time.Time
+	FinishedTx     int64
+	FinishedTxP    int64
+	MaxTPS         float64
+	MaxPendingTx   int64
+	MaxWaitingTime float64
+	PendingTx      int64
+	Locker         sync.Mutex
+}
+
 type Benchmark struct {
 	JsonrpcEndpoint string
 	MainKey         string
@@ -22,15 +34,7 @@ type Benchmark struct {
 	GasLmit         int64
 	GasPrice        int64
 	PendingTxLimit  int64
-	StartTime       time.Time
-	StartTimeP      time.Time
-	FinishedTx      int64
-	FinishedTxP     int64
-	MaxTPS          float64
-	MaxPendingTx    int64
-	MaxWaitingTime  float64
-	PendingTx       int64
-	Locker          sync.Mutex
+	ResultData      *ResultData
 }
 
 func NewBenchmark(jsonrpcEndpoint, mainKey string, balanceLimit, gasLimit, gasPrice, pendingTxLimit int64) *Benchmark {
@@ -41,19 +45,29 @@ func NewBenchmark(jsonrpcEndpoint, mainKey string, balanceLimit, gasLimit, gasPr
 		GasLmit:         gasLimit,
 		GasPrice:        gasPrice,
 		PendingTxLimit:  pendingTxLimit,
-		FinishedTx:      0,
-		FinishedTxP:     0,
-		PendingTx:       0,
+		ResultData: &ResultData{
+			FinishedTx:  0,
+			FinishedTxP: 0,
+			PendingTx:   0,
+		},
 	}
 }
 
 func (b *Benchmark) Run() {
 	// open grpc connection
-	conn, err := b.openConnection(b.JsonrpcEndpoint)
+	conn, err := ethclient.Dial(b.JsonrpcEndpoint)
 	if err != nil {
-		glog.Errorf("Failed to openConnection, err: ", err)
+		glog.Errorf("Failed to dial, url: %s, err: %s\n", b.JsonrpcEndpoint, err)
+		return
 	}
+	networkId, err := conn.NetworkID(context.Background())
+	if err != nil {
+		glog.Errorf("Failed to get networkId, err: %s\n", err)
+		return
+	}
+	glog.V(1).Infof("Connect to Ethereum success, networkId: %d\n", networkId)
 
+	// gen key
 	keyChannel := make(chan *ecdsa.PrivateKey, 1000)
 	go func() {
 		for {
@@ -65,11 +79,11 @@ func (b *Benchmark) Run() {
 		}
 	}()
 
-	fromKey, _ := crypto.HexToECDSA(b.MainKey)
-
-	b.StartTime = time.Now()
-	b.StartTimeP = time.Now()
+	// start test
+	b.ResultData.StartTime = time.Now()
+	b.ResultData.StartTimeP = time.Now()
 	go func() {
+		fromKey, _ := crypto.HexToECDSA(b.MainKey)
 		b.distributeEthereum(conn, fromKey, keyChannel)
 	}()
 	select {}
@@ -77,6 +91,7 @@ func (b *Benchmark) Run() {
 
 func (b *Benchmark) distributeEthereum(conn *ethclient.Client, fromKey *ecdsa.PrivateKey, keyChannel chan *ecdsa.PrivateKey) {
 
+	// check balance
 	fromAddress := crypto.PubkeyToAddress(fromKey.PublicKey)
 	ctx := context.Background()
 	balance, err := conn.BalanceAt(context.Background(), fromAddress, nil)
@@ -90,12 +105,15 @@ func (b *Benchmark) distributeEthereum(conn *ethclient.Client, fromKey *ecdsa.Pr
 		return
 	}
 
+	// calculate distribute amount
 	count := 2
 	limit.Neg(limit)
 	balance.Add(balance, limit)
 	balance.Div(balance, big.NewInt(int64(count)))
 
+	// distribute eth
 	for i := 0; i < count; i++ {
+		// SendTransaction
 		toKey := <-keyChannel
 		toAddress := crypto.PubkeyToAddress(toKey.PublicKey)
 		nonce, _ := conn.NonceAt(ctx, fromAddress, nil)
@@ -107,83 +125,69 @@ func (b *Benchmark) distributeEthereum(conn *ethclient.Client, fromKey *ecdsa.Pr
 			return
 		}
 
-		b.Locker.Lock()
-		// print log
+		// update data
+		b.ResultData.Locker.Lock()
 		var tpsP float64
-		if time.Now().Sub(b.StartTimeP).Seconds() > 60 {
-			tpsP = float64(b.FinishedTxP) / time.Now().Sub(b.StartTimeP).Seconds()
-			if tpsP > b.MaxTPS {
-				b.MaxTPS = tpsP
+		if time.Now().Sub(b.ResultData.StartTimeP).Seconds() > 60 { // update period data if more than 1min
+			tpsP = float64(b.ResultData.FinishedTxP) / time.Now().Sub(b.ResultData.StartTimeP).Seconds()
+			if tpsP > b.ResultData.MaxTPS {
+				b.ResultData.MaxTPS = tpsP
 			}
 
 			// reset period
-			b.StartTimeP = time.Now()
-			b.FinishedTxP = 0
+			b.ResultData.StartTimeP = time.Now()
+			b.ResultData.FinishedTxP = 0
 		}
-		tps := float64(b.FinishedTx) / time.Now().Sub(b.StartTime).Seconds()
-		if tps > b.MaxTPS {
-			b.MaxTPS = tps
+		tps := float64(b.ResultData.FinishedTx) / time.Now().Sub(b.ResultData.StartTime).Seconds()
+		if tps > b.ResultData.MaxTPS {
+			b.ResultData.MaxTPS = tps
 		}
 		glog.V(1).Infof("MaxTPS: %f; MaxPendingTx: %d; MaxWaitTime: %f; Period TPS: %f; Average TPS: %f; FinishedTx: %d; PendingTx: %d;\n",
-			b.MaxTPS,
-			b.MaxPendingTx,
-			b.MaxWaitingTime,
+			b.ResultData.MaxTPS,
+			b.ResultData.MaxPendingTx,
+			b.ResultData.MaxWaitingTime,
 			tpsP,
 			tps,
-			b.FinishedTx,
-			b.PendingTx)
-		b.PendingTx = b.PendingTx + 1
-		if b.PendingTx > b.MaxPendingTx {
-			b.MaxPendingTx = b.PendingTx
+			b.ResultData.FinishedTx,
+			b.ResultData.PendingTx)
+		b.ResultData.PendingTx = b.ResultData.PendingTx + 1
+		if b.ResultData.PendingTx > b.ResultData.MaxPendingTx {
+			b.ResultData.MaxPendingTx = b.ResultData.PendingTx
 		}
-		b.Locker.Unlock()
+		b.ResultData.Locker.Unlock()
 
 		// begin of tx
 		waitStartTime := time.Now()
 		_, err = bind.WaitMined(ctx, conn, signedTx)
 		if err != nil {
 			glog.Errorf("tx mining error:%v\n", err)
-			b.Locker.Lock()
-			b.PendingTx = b.PendingTx - 1
-			b.Locker.Unlock()
+			b.ResultData.Locker.Lock()
+			b.ResultData.PendingTx = b.ResultData.PendingTx - 1
+			b.ResultData.Locker.Unlock()
 			return
 		}
 		waitTime := time.Now().Sub(waitStartTime).Seconds()
 		// end of tx
 
-		b.Locker.Lock()
-		if waitTime > b.MaxWaitingTime {
-			b.MaxWaitingTime = waitTime
+		// update data
+		b.ResultData.Locker.Lock()
+		if waitTime > b.ResultData.MaxWaitingTime {
+			b.ResultData.MaxWaitingTime = waitTime
 		}
-		b.PendingTx = b.PendingTx - 1
-		b.FinishedTx = b.FinishedTx + 1
-		b.FinishedTxP = b.FinishedTxP + 1
-		b.Locker.Unlock()
-
-		b.Locker.Lock()
-		if b.PendingTx > b.PendingTxLimit {
-			glog.V(4).Infof("PendingTx > %d\n; return.\n", b.PendingTxLimit)
-			b.Locker.Unlock()
+		b.ResultData.PendingTx = b.ResultData.PendingTx - 1
+		b.ResultData.FinishedTx = b.ResultData.FinishedTx + 1
+		b.ResultData.FinishedTxP = b.ResultData.FinishedTxP + 1
+		if b.ResultData.PendingTx > b.PendingTxLimit {
+			glog.V(4).Infof("PendingTx > %d; return.\n", b.PendingTxLimit)
+			b.ResultData.Locker.Unlock()
+			// TODO: should tick check
 			return
 		}
-		b.Locker.Unlock()
+		b.ResultData.Locker.Unlock()
+
+		// cal another
 		go func() {
 			b.distributeEthereum(conn, toKey, keyChannel)
 		}()
 	}
-}
-
-func (b *Benchmark) openConnection(jsonrpcEndpoint string) (*ethclient.Client, error) {
-	conn, err := ethclient.Dial(jsonrpcEndpoint)
-	if err != nil {
-		glog.Errorf("Failed to dial, url: ", jsonrpcEndpoint, ", err: ", err)
-		return nil, err
-	}
-	networkId, err := conn.NetworkID(context.Background())
-	if err != nil {
-		glog.Errorf("Failed to get networkId, err: ", err)
-		return nil, err
-	}
-	glog.V(1).Infof("Connect to Ethereum success, networkId: %d\n", networkId)
-	return conn, nil
 }

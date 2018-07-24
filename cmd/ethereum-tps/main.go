@@ -41,11 +41,7 @@ func main() {
 			if err != nil {
 				glog.Errorf("Failed to get gas-price, err: ", err)
 			}
-			pendingTxLimit, err := cmd.Flags().GetInt64("pending-tx-limit")
-			if err != nil {
-				glog.Errorf("Failed to get pending-tx-limit, err: ", err)
-			}
-			b := benchmark.NewBenchmark(jsonrpcEndpoint, mainKey, balanceLimit, gasLimit, gasPrice, pendingTxLimit)
+			b := benchmark.NewBenchmark(jsonrpcEndpoint, mainKey, balanceLimit, gasLimit, gasPrice)
 			b.Run()
 		},
 	}
@@ -55,7 +51,6 @@ func main() {
 	cmd.PersistentFlags().Int64("balance-limit", 10000000000000000, "When reaching this limit, account will not distribute eth.")
 	cmd.PersistentFlags().Int64("gas-limit", 61569, "Global gasLimit for tx.")
 	cmd.PersistentFlags().Int64("gas-price", 18000000000, "Global gasPrice for tx.")
-	cmd.PersistentFlags().Int64("pending-tx-limit", 400, "The num of pending tx limit.")
 
 	goflag.Set("v", "4")
 	// TODO: once we switch everything over to Cobra commands, we can go back to calling

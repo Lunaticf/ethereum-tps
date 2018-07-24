@@ -13,7 +13,10 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/golang/glog"
+	"strings"
 )
+
+var RetryCount = 30
 
 type ResultData struct {
 	StartTime      time.Time
@@ -33,18 +36,16 @@ type Benchmark struct {
 	BalanceLimit    int64
 	GasLmit         int64
 	GasPrice        int64
-	PendingTxLimit  int64
 	ResultData      *ResultData
 }
 
-func NewBenchmark(jsonrpcEndpoint, mainKey string, balanceLimit, gasLimit, gasPrice, pendingTxLimit int64) *Benchmark {
+func NewBenchmark(jsonrpcEndpoint, mainKey string, balanceLimit, gasLimit, gasPrice int64) *Benchmark {
 	return &Benchmark{
 		JsonrpcEndpoint: jsonrpcEndpoint,
 		MainKey:         mainKey,
 		BalanceLimit:    balanceLimit,
 		GasLmit:         gasLimit,
 		GasPrice:        gasPrice,
-		PendingTxLimit:  pendingTxLimit,
 		ResultData: &ResultData{
 			FinishedTx:  0,
 			FinishedTxP: 0,
@@ -119,9 +120,17 @@ func (b *Benchmark) distributeEthereum(conn *ethclient.Client, fromKey *ecdsa.Pr
 		nonce, _ := conn.NonceAt(ctx, fromAddress, nil)
 		tx := types.NewTransaction(nonce, toAddress, balance, uint64(b.GasLmit), big.NewInt(b.GasPrice), nil)
 		signedTx, err := types.SignTx(tx, types.HomesteadSigner{}, fromKey)
-		err = conn.SendTransaction(ctx, signedTx)
+		for i := 0; i < RetryCount; i++ {
+			err = conn.SendTransaction(ctx, signedTx)
+			if strings.Contains(err.Error(), "cannot assign requested address") {
+				glog.V(4).Infof("connect: cannot assign requested address, retry in 1s, count=%d\n", i)
+				time.Sleep(time.Duration(1) * time.Second)
+				continue
+			}
+			break
+		}
 		if err != nil {
-			glog.Errorf("SendTransaction error:%v\n", err)
+			glog.Errorf("SendTransaction failed after retry.\n")
 			return
 		}
 
@@ -177,12 +186,6 @@ func (b *Benchmark) distributeEthereum(conn *ethclient.Client, fromKey *ecdsa.Pr
 		b.ResultData.PendingTx = b.ResultData.PendingTx - 1
 		b.ResultData.FinishedTx = b.ResultData.FinishedTx + 1
 		b.ResultData.FinishedTxP = b.ResultData.FinishedTxP + 1
-		if b.ResultData.PendingTx > b.PendingTxLimit {
-			glog.V(4).Infof("PendingTx > %d; return.\n", b.PendingTxLimit)
-			b.ResultData.Locker.Unlock()
-			// TODO: should tick check
-			return
-		}
 		b.ResultData.Locker.Unlock()
 
 		// cal another

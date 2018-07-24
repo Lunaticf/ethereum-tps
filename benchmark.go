@@ -130,7 +130,7 @@ func (b *Benchmark) distributeEthereum(conn *ethclient.Client, fromKey *ecdsa.Pr
 			break
 		}
 		if err != nil {
-			glog.Errorf("SendTransaction failed after retry.\n")
+			glog.Errorf("SendTransaction failed after retry: %s\n", err)
 			return
 		}
 

@@ -122,7 +122,7 @@ func (b *Benchmark) distributeEthereum(conn *ethclient.Client, fromKey *ecdsa.Pr
 		signedTx, err := types.SignTx(tx, types.HomesteadSigner{}, fromKey)
 		for i := 0; i < RetryCount; i++ {
 			err = conn.SendTransaction(ctx, signedTx)
-			if strings.Contains(err.Error(), "cannot assign requested address") {
+			if err != nil && strings.Contains(err.Error(), "cannot assign requested address") {
 				glog.V(4).Infof("connect: cannot assign requested address, retry in 1s, count=%d\n", i)
 				time.Sleep(time.Duration(1) * time.Second)
 				continue

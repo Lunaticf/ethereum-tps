@@ -120,13 +120,14 @@ func (b *Benchmark) distributeEthereum(conn *ethclient.Client, fromKey *ecdsa.Pr
 
 	// distribute eth
 	for i := 0; i < count; i++ {
+		var signedTx *types.Transaction
 		// SendTransaction
 		toKey := <-keyChannel
 		toAddress := crypto.PubkeyToAddress(toKey.PublicKey)
 		for i := 0; i < RetryCount; i++ {
 			nonce, _ := conn.NonceAt(ctx, fromAddress, nil)
 			tx := types.NewTransaction(nonce, toAddress, balance, uint64(b.GasLmit), big.NewInt(b.GasPrice), nil)
-			signedTx, err := types.SignTx(tx, types.HomesteadSigner{}, fromKey)
+			signedTx, err = types.SignTx(tx, types.HomesteadSigner{}, fromKey)
 			err = conn.SendTransaction(ctx, signedTx)
 			if err != nil && strings.Contains(err.Error(), "cannot assign requested address") {
 				glog.V(4).Infof("connect: cannot assign requested address, retry in 1s, count=%d\n", i)

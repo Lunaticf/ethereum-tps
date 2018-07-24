@@ -95,10 +95,16 @@ func (b *Benchmark) distributeEthereum(conn *ethclient.Client, fromKey *ecdsa.Pr
 	// check balance
 	fromAddress := crypto.PubkeyToAddress(fromKey.PublicKey)
 	ctx := context.Background()
-	balance, err := conn.BalanceAt(context.Background(), fromAddress, nil)
-	if err != nil {
-		glog.Errorf("conn.BalanceAt error:%v\n", err)
-		return
+	var balance *big.Int
+	var err error
+	for i := 0; i < RetryCount; i++ {
+		balance, err = conn.BalanceAt(context.Background(), fromAddress, nil)
+		if err != nil && strings.Contains(err.Error(), "cannot assign requested address") {
+			glog.V(4).Infof("conn.BalanceAt, connect: cannot assign requested address, retry in 1s, count=%d\n", i)
+			time.Sleep(time.Duration(1) * time.Second)
+			continue
+		}
+		break
 	}
 	limit := big.NewInt(b.BalanceLimit) // 10^16 = 0.01eth
 	if balance.Cmp(limit) < 0 {

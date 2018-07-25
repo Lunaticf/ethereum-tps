@@ -39,6 +39,15 @@ type Benchmark struct {
 	ResultData      *ResultData
 }
 
+type BenchmarkTwo struct {
+	JsonrpcEndpoint string
+	MainKey         string
+	BalanceLimit    int64
+	GasLmit         int64
+	GasPrice        int64
+	ResultData      *ResultData
+}
+
 func NewBenchmark(jsonrpcEndpoint, mainKey string, balanceLimit, gasLimit, gasPrice int64) *Benchmark {
 	return &Benchmark{
 		JsonrpcEndpoint: jsonrpcEndpoint,
@@ -54,7 +63,16 @@ func NewBenchmark(jsonrpcEndpoint, mainKey string, balanceLimit, gasLimit, gasPr
 	}
 }
 
-func (b *Benchmark) Run() {
+func (b *Benchmark) Run(index int64) {
+	switch index {
+	case 1:
+		b.runOne()
+	case 2:
+		b.runTwo()
+	}
+}
+
+func (b *Benchmark) runOne() {
 	// open grpc connection
 	conn, err := ethclient.Dial(b.JsonrpcEndpoint)
 	if err != nil {
@@ -200,4 +218,45 @@ func (b *Benchmark) distributeEthereum(conn *ethclient.Client, fromKey *ecdsa.Pr
 			b.distributeEthereum(conn, toKey, keyChannel)
 		}()
 	}
+}
+
+func (b *Benchmark) runTwo()  {
+	// open grpc connection
+	conn, err := ethclient.Dial(b.JsonrpcEndpoint)
+	if err != nil {
+		glog.Errorf("Failed to dial, url: %s, err: %s\n", b.JsonrpcEndpoint, err)
+		return
+	}
+	networkId, err := conn.NetworkID(context.Background())
+	if err != nil {
+		glog.Errorf("Failed to get networkId, err: %s\n", err)
+		return
+	}
+	glog.V(1).Infof("Connect to Ethereum success, networkId: %d\n", networkId)
+
+	ctx := context.Background()
+	// from
+	fromKey, _ := crypto.HexToECDSA(b.MainKey)
+	fromAddress := crypto.PubkeyToAddress(fromKey.PublicKey)
+	// to
+	privateKeyECDSA, err := ecdsa.GenerateKey(crypto.S256(), crand.Reader)
+	if err != nil {
+		glog.Errorf("ecdsa.GenerateKey failed: %v\n", err)
+	}
+	toAddress := crypto.PubkeyToAddress(privateKeyECDSA.PublicKey)
+	// start nonce
+	nonce, _ := conn.NonceAt(ctx, fromAddress, nil)
+
+	for {
+		tx := types.NewTransaction(nonce, toAddress, big.NewInt(1), uint64(b.GasLmit), big.NewInt(b.GasPrice), nil)
+		signedTx, err := types.SignTx(tx, types.HomesteadSigner{}, fromKey)
+		if err != nil {
+			glog.Errorf("Failed to SignTx, err: %s\n", err)
+		}
+		// txData, _ := signedTx.MarshalJSON()
+		// glog.V(1).Infof("TX: %s\n", string(txData))
+		err = conn.SendTransaction(ctx, signedTx)
+		nonce++
+	}
+
 }

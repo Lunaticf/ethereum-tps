@@ -26,6 +26,8 @@ type ResultData struct {
 	MaxTPS         float64
 	MaxPendingTx   int64
 	MaxWaitingTime float64
+	TotalWaitingTime float64
+	AverWaitingTime float64
 	PendingTx      int64
 	Locker         sync.Mutex
 }
@@ -176,10 +178,11 @@ func (b *Benchmark) distributeEthereum(conn *ethclient.Client, fromKey *ecdsa.Pr
 		if tps > b.ResultData.MaxTPS {
 			b.ResultData.MaxTPS = tps
 		}
-		glog.V(1).Infof("MaxTPS: %f; MaxPendingTx: %d; MaxWaitTime: %f; Period TPS: %f; Average TPS: %f; FinishedTx: %d; PendingTx: %d;\n",
+		glog.V(1).Infof("MaxTPS: %f; MaxPendingTx: %d; MaxWaitTime: %f; AverWaitingTime: %f; Period TPS: %f; Average TPS: %f; FinishedTx: %d; PendingTx: %d;\n",
 			b.ResultData.MaxTPS,
 			b.ResultData.MaxPendingTx,
 			b.ResultData.MaxWaitingTime,
+			b.ResultData.AverWaitingTime,
 			tpsP,
 			tps,
 			b.ResultData.FinishedTx,
@@ -208,8 +211,10 @@ func (b *Benchmark) distributeEthereum(conn *ethclient.Client, fromKey *ecdsa.Pr
 		if waitTime > b.ResultData.MaxWaitingTime {
 			b.ResultData.MaxWaitingTime = waitTime
 		}
+		b.ResultData.TotalWaitingTime += waitTime
 		b.ResultData.PendingTx = b.ResultData.PendingTx - 1
 		b.ResultData.FinishedTx = b.ResultData.FinishedTx + 1
+		b.ResultData.AverWaitingTime = b.ResultData.TotalWaitingTime / float64(b.ResultData.FinishedTx)
 		b.ResultData.FinishedTxP = b.ResultData.FinishedTxP + 1
 		b.ResultData.Locker.Unlock()
 
